@@ -6,7 +6,6 @@
     <title>ESP32-C6 Hub Controller</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <style>
-        /* Custom toggle switch wrappers using Tailwind's theme colors */
         .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider {
@@ -33,7 +32,7 @@
     <section class="status-panel bg-white p-5 rounded-lg shadow-md mb-8 flex flex-wrap gap-10 items-center">
         <div>
             <strong class="font-bold">Serial Status:</strong> 
-            <span id="serial-status-dot" class="status-indicator inline-block w-3 height h-3 rounded-full bg-[#ef4444] mr-2 transition-colors duration-200"></span>
+            <span id="serial-status-dot" class="status-indicator inline-block w-3 h-3 rounded-full bg-[#ef4444] mr-2 transition-colors duration-200"></span>
             <span id="serial-status-text">Disconnected</span>
         </div>
         <div>
@@ -72,7 +71,6 @@
         let writer = null;
         let reader = null;
         let readableStreamClosed = null;
-        let writableStreamClosed = null;
 
         const btnConnect = document.getElementById('btn-connect');
         const btnDiscover = document.getElementById('btn-discover');
@@ -83,6 +81,7 @@
         const tableBody = document.getElementById('satellite-rows');
 
         let satelliteRegistry = {}; 
+        let discoveryOrder = []; 
 
         btnConnect.addEventListener('click', async () => {
             if (port) {
@@ -93,7 +92,6 @@
                 }
                 if (writer) {
                     await writer.close();
-                    await writableStreamClosed.catch(() => {});
                     writer = null;
                 }
                 await port.close();
@@ -107,11 +105,7 @@
                 await port.open({ baudRate: 115200 });
                 
                 updateSerialUI(true);
-                
-                const encoder = new TextEncoderStream();
-                writableStreamClosed = encoder.readable.pipeTo(port.writable);
-                writer = encoder.writable.getWriter();
-
+                writer = port.writable.getWriter();
                 readSerialLoop();
             } catch (err) {
                 console.error("Serial Connection Failed:", err);
@@ -124,14 +118,15 @@
             if (writer) {
                 tableBody.innerHTML = ""; 
                 satelliteRegistry = {};
-                await writer.write("DISCOVER\n");
+                discoveryOrder = [];
+                const encoder = new TextEncoder();
+                await writer.write(encoder.encode("DISCOVER\n"));
             }
         });
 
         function updateSerialUI(isConnected) {
             if (isConnected) {
                 btnConnect.textContent = "Disconnect Serial";
-                // Kept clean with Tailwind backgrounds injected dynamically via JavaScript
                 serialDot.className = "status-indicator inline-block w-3 h-3 rounded-full mr-2 transition-colors duration-200 bg-[#22c55e]";
                 serialText.textContent = "Connected";
                 btnDiscover.disabled = false;
@@ -192,6 +187,7 @@
                 const idStr = line.split(":")[1];
                 if (!satelliteRegistry[idStr]) {
                     satelliteRegistry[idStr] = [false, false, false, false];
+                    discoveryOrder.push(idStr);
                     appendSatelliteRow(idStr);
                 }
             }
@@ -201,7 +197,6 @@
             const tr = document.createElement('tr');
             tr.id = `sat-${idStr}`;
             
-            // Replaced custom code styling with inline Tailwind variables
             let html = `<td class="p-4.5 pl-5"><code class="font-bold text-[#0f172a] bg-[#f1f5f9] px-1.5 py-0.5 rounded">${idStr}</code></td>`;
             for (let i = 0; i < 4; i++) {
                 html += `
@@ -219,14 +214,34 @@
         async function handleToggle(checkbox) {
             const idStr = checkbox.getAttribute('data-sat');
             const lightIndex = parseInt(checkbox.getAttribute('data-light'));
-            const state = checkbox.checked ? 1 : 0;
 
+            // Keep track of state locally
             satelliteRegistry[idStr][lightIndex] = checkbox.checked;
 
             if (writer) {
-                const cmd = `LIGHT:${idStr}:${lightIndex}:${state}\n`;
-                await writer.write(cmd);
-                console.log("Sent command:", cmd.trim());
+                // 8 clients max * 4 channels = 32 bytes total
+                const totalLights = 32;
+                const byteArray = new Uint8Array(totalLights);
+
+                // Build sequential 1-byte array block matched with active discovery sequence
+                for (let c = 0; c < discoveryOrder.length && c < 8; c++) {
+                    const satId = discoveryOrder[c];
+                    const states = satelliteRegistry[satId];
+                    for (let l = 0; l < 4; l++) {
+                        const offset = (c * 4) + l;
+                        byteArray[offset] = states[l] ? 255 : 0;
+                    }
+                }
+
+                // Append simple text token header prefix "FRAME:"
+                const headerBytes = new TextEncoder().encode("FRAME:");
+                const outputPayload = new Uint8Array(headerBytes.length + byteArray.length);
+                
+                outputPayload.set(headerBytes, 0);
+                outputPayload.set(byteArray, headerBytes.length);
+
+                await writer.write(outputPayload);
+                console.log(`Dispatched Full Uint8 Array Frame (${byteArray.length} bytes total)`);
             }
         }
     </script>
