@@ -48,6 +48,56 @@
         </button>
     </section>
 
+    <section class="bg-white p-6 rounded-lg shadow-md mb-8">
+        <h2 class="text-xl font-bold mb-4 flex items-center justify-between">
+            <span>Routing & Animation Controls</span>
+            <span class="text-sm font-normal text-gray-500">Last Toggled Light Index: <code id="lbl-last-index" class="bg-gray-100 px-1 rounded font-bold">-</code></span>
+        </h2>
+        
+        <div class="mb-6">
+            <div class="flex justify-between items-center mb-2">
+                <label class="block text-sm font-semibold text-gray-600">Dynamic Playback Tracking Order Matrix Configuration Array:</label>
+                <button id="btn-reset-order" class="bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-1 px-3 rounded transition-colors">
+                    Reset Array Sequence (-1)
+                </button>
+            </div>
+            <div id="order-button-container" class="flex flex-wrap gap-2 p-3 bg-gray-50 rounded-md border border-gray-200 min-h-[50px]">
+                <span class="text-gray-400 text-sm self-center italic">Discover satellites to populate the order routing engine slots...</span>
+            </div>
+        </div>
+
+        <hr class="border-gray-200 my-4" />
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+            <div>
+                <label for="select-animation" class="block text-sm font-semibold text-gray-600 mb-2">Select Active Routine Loop Style Profile:</label>
+                <select id="select-animation" class="w-full bg-white border border-gray-300 rounded-md p-2 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                    <option value="0">1: Ordered Sequential Count (w/ Tail Pause)</option>
+                    <option value="1">2: Synchronized Sine Wave Layer Grid</option>
+                    <option value="2">3: Color Bounce (Ping-Pong Pulse Tracer)</option>
+                    <option value="3">4: Breathing Deep Ambient Fade Glow</option>
+                    <option value="4">5: Sparkle Pulse Strobe Generator</option>
+                    <option value="5">6: Falling Comet Transient Trail Sweep</option>
+                </select>
+                <div class="flex gap-2 mt-3">
+                    <button id="btn-start-anim" class="flex-1 bg-green-600 text-white font-semibold py-2 px-4 rounded hover:bg-green-700 transition-colors disabled:bg-gray-300">Start Animation</button>
+                    <button id="btn-stop-anim" class="flex-1 bg-gray-600 text-white font-semibold py-2 px-4 rounded hover:bg-gray-700 transition-colors disabled:bg-gray-300" disabled>Stop Animation</button>
+                </div>
+            </div>
+            <div>
+                <div class="flex justify-between items-center mb-2">
+                    <label for="slider-speed" class="text-sm font-semibold text-gray-600">Animation Pipeline Delta Speed Clock Velocity Scaling Factor:</label>
+                    <span id="lbl-speed-val" class="text-xs font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded">1.0x</span>
+                </div>
+                <input type="range" id="slider-speed" min="0.1" max="4.0" step="0.1" value="1.0" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600" />
+                <div class="mt-4 text-xs text-gray-500 leading-relaxed">
+                    <span class="font-bold text-gray-700 block mb-1">Configuration Architecture Rule Guide Matrix Context Notes:</span>
+                    Toggle any light below to isolate its state index profile. Click any numerical box indicator up inside the configuration track view block row path directly overhead to assign that focused index track mapping element location sequence path seamlessly!
+                </div>
+            </div>
+        </div>
+    </section>
+
     <section>
         <h2 class="text-2xl font-bold mb-4">Discovered Satellites</h2>
         <div class="overflow-hidden rounded-lg shadow-md bg-white">
@@ -80,11 +130,30 @@
         const satCountText = document.getElementById('satellites-count');
         const tableBody = document.getElementById('satellite-rows');
 
+        // New Element Declarations for Routing/Animation Controls Row Systems Trackers
+        const orderContainer = document.getElementById('order-button-container');
+        const btnResetOrder = document.getElementById('btn-reset-order');
+        const selectAnim = document.getElementById('select-animation');
+        const btnStartAnim = document.getElementById('btn-start-anim');
+        const btnStopAnim = document.getElementById('btn-stop-anim');
+        const sliderSpeed = document.getElementById('slider-speed');
+        const lblSpeedVal = document.getElementById('lbl-speed-val');
+        const lblLastIndex = document.getElementById('lbl-last-index');
+
         let satelliteRegistry = {}; 
         let discoveryOrder = []; 
 
+        // State variables for routing and animations Engine System parameters
+        let assignedOrder = [];      // Array of indices matching current discovered capacity
+        let lastToggledIndex = -1;   // Remembers index of the last manually adjusted light channel path
+        let animationActive = false; 
+        let animationFrameId = null; 
+        let animClockTime = 0;       // Monotonically increasing abstract float timeline tracker variable
+        let lastTimeTimestamp = 0;   // Used to track clock steps across window loop execution threads
+
         btnConnect.addEventListener('click', async () => {
             if (port) {
+                stopAnimationLoopEngine();
                 if (reader) {
                     await reader.cancel();
                     await readableStreamClosed.catch(() => {});
@@ -116,9 +185,15 @@
 
         btnDiscover.addEventListener('click', async () => {
             if (writer) {
+                stopAnimationLoopEngine();
                 tableBody.innerHTML = ""; 
                 satelliteRegistry = {};
                 discoveryOrder = [];
+                assignedOrder = [];
+                orderContainer.innerHTML = `<span class="text-gray-400 text-sm self-center italic">Discovering and rebuilding mapping tables...</span>`;
+                lastToggledIndex = -1;
+                lblLastIndex.textContent = "-";
+                
                 const encoder = new TextEncoder();
                 await writer.write(encoder.encode("DISCOVER\n"));
             }
@@ -138,6 +213,7 @@
                 satCountText.textContent = "0";
                 btnDiscover.disabled = true;
                 tableBody.innerHTML = "";
+                orderContainer.innerHTML = `<span class="text-gray-400 text-sm self-center italic">Discover satellites to populate the order routing engine slots...</span>`;
             }
         }
 
@@ -189,6 +265,7 @@
                     satelliteRegistry[idStr] = [false, false, false, false];
                     discoveryOrder.push(idStr);
                     appendSatelliteRow(idStr);
+                    rebuildOrderSequenceControlElements();
                 }
             }
         }
@@ -199,10 +276,12 @@
             
             let html = `<td class="p-4.5 pl-5"><code class="font-bold text-[#0f172a] bg-[#f1f5f9] px-1.5 py-0.5 rounded">${idStr}</code></td>`;
             for (let i = 0; i < 4; i++) {
+                // Determine absolute index reference offset value mapping identity profile parameter properties
+                const theoreticalAbsoluteIdx = ((discoveryOrder.length - 1) * 4) + i;
                 html += `
                     <td class="p-4.5">
                         <label class="switch">
-                            <input type="checkbox" data-sat="${idStr}" data-light="${i}" onchange="handleToggle(this)">
+                            <input type="checkbox" data-sat="${idStr}" data-light="${i}" data-abs-index="${theoreticalAbsoluteIdx}" onchange="handleToggle(this)">
                             <span class="slider"></span>
                         </label>
                     </td>`;
@@ -211,16 +290,91 @@
             tableBody.appendChild(tr);
         }
 
+        // Setup and maintain layout buttons array elements for targeting indexes inside sequence runtime blocks
+        function rebuildOrderSequenceControlElements() {
+            orderContainer.innerHTML = "";
+            const dynamicTotalLightsCount = discoveryOrder.length * 4;
+            
+            // Adjust sequence capacity dynamically safely keeping array data entries integrity mapping indexes
+            while(assignedOrder.length < dynamicTotalLightsCount) {
+                assignedOrder.push(-1);
+            }
+            if(assignedOrder.length > dynamicTotalLightsCount) {
+                assignedOrder = assignedOrder.slice(0, dynamicTotalLightsCount);
+            }
+
+            for (let i = 0; i < dynamicTotalLightsCount; i++) {
+                const btn = document.createElement('button');
+                btn.type = "button";
+                btn.id = `btn-order-slot-${i}`;
+                btn.className = "bg-white border-2 border-gray-300 hover:border-blue-500 text-gray-800 text-xs font-bold py-1.5 px-3 rounded transition-all cursor-pointer min-w-[55px] text-center shadow-xs flex flex-col items-center justify-center";
+                
+                // Track targeting parameters via element fields properties array attributes tags
+                btn.setAttribute('data-slot-idx', i);
+                btn.addEventListener('click', () => { handleAssignOrderSlotClick(i); });
+                
+                updateOrderButtonVisualDisplay(btn, assignedOrder[i], i);
+                orderContainer.appendChild(btn);
+            }
+        }
+
+        function updateOrderButtonVisualDisplay(element, value, slotIndex) {
+            if(value === -1) {
+                element.innerHTML = `<span class="text-[9px] text-gray-400 block uppercase tracking-tight">Slot ${slotIndex}</span><span class="text-sm font-extrabold text-gray-300">-1</span>`;
+                element.className = element.className.replace(/border-blue-[0-9]{3}/g, 'border-gray-300').replace('bg-blue-50', 'bg-white');
+            } else {
+                element.innerHTML = `<span class="text-[9px] text-blue-500 block uppercase tracking-tight">Slot ${slotIndex}</span><span class="text-sm font-extrabold text-blue-600">#${value}</span>`;
+                element.className = element.className.replace('border-gray-300', 'border-blue-400') + " bg-blue-50";
+            }
+        }
+
+        function handleAssignOrderSlotClick(slotIndex) {
+            if (lastToggledIndex !== -1) {
+                assignedOrder[slotIndex] = lastToggledIndex;
+                const targetBtn = document.getElementById(`btn-order-slot-${slotIndex}`);
+                if (targetBtn) {
+                    updateOrderButtonVisualDisplay(targetBtn, lastToggledIndex, slotIndex);
+                }
+                console.log(`Assigned physical channel light reference index [${lastToggledIndex}] onto sequencing system routing slot [${slotIndex}]`);
+            } else {
+                alert("Please toggle a light below first to register an active target index channel before making assignments!");
+            }
+        }
+
+        btnResetOrder.addEventListener('click', () => {
+            for (let i = 0; i < assignedOrder.length; i++) {
+                assignedOrder[i] = -1;
+                const targetBtn = document.getElementById(`btn-order-slot-${i}`);
+                if (targetBtn) {
+                    updateOrderButtonVisualDisplay(targetBtn, -1, i);
+                }
+            }
+            console.log("Reset active tracking sequence order vectors to empty (-1) profiles completely.");
+        });
+
         async function handleToggle(checkbox) {
+            // Stop any active animations instantly when interacting with custom toggle adjustments
+            if(animationActive) {
+                stopAnimationLoopEngine();
+            }
+
             const idStr = checkbox.getAttribute('data-sat');
             const lightIndex = parseInt(checkbox.getAttribute('data-light'));
+            const absoluteChannelIdx = parseInt(checkbox.getAttribute('data-abs-index'));
+
+            // Store last adjusted light reference tracking value globally inside control systems interface layout blocks
+            lastToggledIndex = absoluteChannelIdx;
+            lblLastIndex.textContent = absoluteChannelIdx;
 
             // Keep track of state locally
             satelliteRegistry[idStr][lightIndex] = checkbox.checked;
 
+            await transmitManualHardwareFramePayload();
+        }
+
+        async function transmitManualHardwareFramePayload() {
             if (writer) {
-                // 8 clients max * 4 channels = 32 bytes total
-                const totalLights = 32;
+                const totalLights = 32; // 8 clients max * 4 channels = 32 bytes total
                 const byteArray = new Uint8Array(totalLights);
 
                 // Build sequential 1-byte array block matched with active discovery sequence
@@ -242,6 +396,200 @@
 
                 await writer.write(outputPayload);
                 console.log(`Dispatched Full Uint8 Array Frame (${byteArray.length} bytes total)`);
+            }
+        }
+
+        // UI Event Listeners hooks targeting speed values tracking text display modules parameters setup loops
+        sliderSpeed.addEventListener('input', (e) => {
+            lblSpeedVal.textContent = parseFloat(e.target.value).toFixed(1) + "x";
+        });
+
+        btnStartAnim.addEventListener('click', () => {
+            if (!port || !writer) {
+                alert("Please open and initialize the Serial Port hardware channel connection first before dispatching animations routines!");
+                return;
+            }
+            if (discoveryOrder.length === 0) {
+                alert("No hardware targets registered! Trigger Discovery routine cycle before attempting animations tracks simulation passes.");
+                return;
+            }
+            startAnimationLoopEngine();
+        });
+
+        btnStopAnim.addEventListener('click', () => {
+            stopAnimationLoopEngine();
+        });
+
+        function startAnimationLoopEngine() {
+            if(animationActive) return;
+            animationActive = true;
+            btnStartAnim.disabled = true;
+            btnStopAnim.disabled = false;
+            btnStartAnim.className = btnStartAnim.className.replace('bg-green-600', 'bg-gray-300').replace('hover:bg-green-700', '');
+            
+            animClockTime = 0;
+            lastTimeTimestamp = performance.now();
+            animationFrameId = requestAnimationFrame(processingAnimationTimelineTickStep);
+            console.log("Animation Engine Pipeline Execution Thread Core: STARTED successfully.");
+        }
+
+        function stopAnimationLoopEngine() {
+            if(!animationActive) return;
+            animationActive = false;
+            btnStartAnim.disabled = false;
+            btnStopAnim.disabled = true;
+            btnStartAnim.className = btnStartAnim.className.replace('bg-gray-300', 'bg-green-600') + " hover:bg-green-700";
+            
+            if(animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            
+            console.log("Animation Engine Pipeline Execution Thread Core: STOPPED. Returning channels control safely over to toggles registry context mapping profiles.");
+            // Return light configurations to normal values configured via manual dashboard options
+            transmitManualHardwareFramePayload();
+        }
+
+        // Core Render Matrix Frame Interpolation Engine Function running smoothly inside RAF loops frames loops pass threads
+        async function processingAnimationTimelineTickStep(currentHighResTimestamp) {
+            if(!animationActive) return;
+
+            // Calculate exact timing delta variations dynamically matching custom velocity slider scale vectors
+            const elapsedDeltaMs = currentHighResTimestamp - lastTimeTimestamp;
+            lastTimeTimestamp = currentHighResTimestamp;
+            
+            const clientSpeedModifier = parseFloat(sliderSpeed.value);
+            // Advance clock factor normalized to standard 60FPS update loops configurations ticks properties paths
+            animClockTime += (elapsedDeltaMs / 1000.0) * clientSpeedModifier;
+
+            const selectedRoutineProfileId = parseInt(selectAnim.value);
+            const totalDiscoveryCapacityCount = discoveryOrder.length * 4;
+
+            // Allocate a blank byte canvas target representing all channels active outputs frames positions
+            const animationOutputFrameBytes = new Uint8Array(32);
+
+            // Fetch running parameters configured from animation calculation algorithms routines
+            computeFrameAnimationSynthesizerData(selectedRoutineProfileId, animationOutputFrameBytes, totalDiscoveryCapacityCount);
+
+            // Ship compiled data out straight via tracking interface down to established serial pipelines wires
+            if (writer) {
+                try {
+                    const headerBytes = new TextEncoder().encode("FRAME:");
+                    const transmissionPayloadBuffer = new Uint8Array(headerBytes.length + animationOutputFrameBytes.length);
+                    
+                    transmissionPayloadBuffer.set(headerBytes, 0);
+                    transmissionPayloadBuffer.set(animationOutputFrameBytes, headerBytes.length);
+                    
+                    await writer.write(transmissionPayloadBuffer);
+                } catch(err) {
+                    console.error("Serial dispatch pipeline dropped frame mid-transfer loop context:", err);
+                }
+            }
+
+            animationFrameId = requestAnimationFrame(processingAnimationTimelineTickStep);
+        }
+
+        // Advanced Procedural Animation Synthesis Routine Engine Layer Blocks Logic Modules Group System Elements 
+        function computeFrameAnimationSynthesizerData(routineId, outputBuffer, capacityCount) {
+            // ROUTINE 0: Sequential Count Sequence Array With 2 Bars Beats Dynamic Pause Padding Block
+            if (routineId === 0) {
+                const stepDurationPeriodSec = 0.35; 
+                const paddingBarsBeatsCount = 8;     
+                const grandLoopTotalStepsCount = capacityCount + paddingBarsBeatsCount;
+                
+                const relativeTimelineProgressionIndex = Math.floor(animClockTime / stepDurationPeriodSec) % grandLoopTotalStepsCount;
+                
+                if (relativeTimelineProgressionIndex < capacityCount) {
+                    const targetAbsoluteMappedPhysicalIndexValue = assignedOrder[relativeTimelineProgressionIndex];
+                    if (targetAbsoluteMappedPhysicalIndexValue >= 0 && targetAbsoluteMappedPhysicalIndexValue < 32) {
+                        outputBuffer[targetAbsoluteMappedPhysicalIndexValue] = 255;
+                    }
+                }
+            }
+            // ROUTINE 1: Synchronized Smooth Sinus Wave Layer Grid Array Sweep Functions Math Channels Data Engine
+            else if (routineId === 1) {
+                for (let i = 0; i < capacityCount; i++) {
+                    const mappedPhysicalChannelIdx = assignedOrder[i];
+                    if (mappedPhysicalChannelIdx >= 0 && mappedPhysicalChannelIdx < 32) {
+                        const phaseOffsetValueFactor = i * 0.4;
+                        const sineWaveComputedCoefficient = Math.sin((animClockTime * 3.5) + phaseOffsetValueFactor);
+                        // Normalize sine resolution output from float [-1.0, 1.0] scale boundary up smoothly into integer [0, 255]
+                        const quantized8BitValue = Math.floor(((sineWaveComputedCoefficient + 1.0) / 2.0) * 255);
+                        outputBuffer[mappedPhysicalChannelIdx] = Math.max(outputBuffer[mappedPhysicalChannelIdx], quantized8BitValue);
+                    }
+                }
+            }
+            // ROUTINE 2: Color Bounce (Ping-Pong Pulse Tracer Vector)
+            else if (routineId === 2) {
+                if (capacityCount > 1) {
+                    const periodCycleDurationFactor = capacityCount * 0.2;
+                    const normalizedTriangularOscillatorTime = (animClockTime % periodCycleDurationFactor) / periodCycleDurationFactor;
+                    // Compute absolute bidirectional triangle shape bounce vector trace point path mappings positions
+                    const floatingTrackingIndexerHead = (Math.asin(Math.sin(animClockTime * 2.5)) / (Math.PI / 2) + 1) / 2 * (capacityCount - 1);
+                    
+                    for (let i = 0; i < capacityCount; i++) {
+                        const mappedPhysicalChannelIdx = assignedOrder[i];
+                        if (mappedPhysicalChannelIdx >= 0 && mappedPhysicalChannelIdx < 32) {
+                            const positionalSpaceOffsetDistance = Math.abs(i - floatingTrackingIndexerHead);
+                            const linearProximityAttenuationFactor = Math.max(0, 1.0 - (positionalSpaceOffsetDistance / 1.2));
+                            const dynamicIntensityLevel = Math.floor(linearProximityAttenuationFactor * 255);
+                            outputBuffer[mappedPhysicalChannelIdx] = Math.max(outputBuffer[mappedPhysicalChannelIdx], dynamicIntensityLevel);
+                        }
+                    }
+                } else if (capacityCount === 1 && assignedOrder[0] !== -1) {
+                    outputBuffer[assignedOrder[0]] = 255;
+                }
+            }
+            // ROUTINE 3: Breathing Deep Ambient Fade Glow Configuration
+            else if (routineId === 3) {
+                const breathingFrequencyClockMod = Math.sin(animClockTime * 2.0);
+                const baselineGlowScalar = ((breathingFrequencyClockMod + 1.0) / 2.0) * 235 + 20; 
+                
+                for(let i = 0; i < capacityCount; i++) {
+                    const targetPhysicalIndexId = assignedOrder[i];
+                    if(targetPhysicalIndexId >= 0 && targetPhysicalIndexId < 32) {
+                        outputBuffer[targetPhysicalIndexId] = Math.floor(baselineGlowScalar);
+                    }
+                }
+            }
+            // ROUTINE 4: Sparkle Pulse Strobe Generator (Noise Mix Matrix Filtering Modules)
+            else if (routineId === 4) {
+                for (let i = 0; i < capacityCount; i++) {
+                    const targetPhysicalIndexId = assignedOrder[i];
+                    if (targetPhysicalIndexId >= 0 && targetPhysicalIndexId < 32) {
+                        // Blend modular time vectors with random noise distribution models dynamically across channels references
+                        const individualChannelSparkleSeed = Math.sin(animClockTime * 15.0 + i * 73.13) * 99.9;
+                        const extractedPseudoRandomFraction = individualChannelSparkleSeed - Math.floor(individualChannelSparkleSeed);
+                        
+                        if (extractedPseudoRandomFraction > 0.88) {
+                            outputBuffer[targetPhysicalIndexId] = Math.floor((extractedPseudoRandomFraction - 0.88) / 0.12 * 215 + 40);
+                        } else {
+                            outputBuffer[targetPhysicalIndexId] = 0;
+                        }
+                    }
+                }
+            }
+            // ROUTINE 5: Falling Comet Transient Trail Sweep Engine Operations
+            else if (routineId === 5) {
+                const cometVelocityDurationTrackScalar = capacityCount * 0.25;
+                const normalizedTimelinePositionTracker = (animClockTime / cometVelocityDurationTrackScalar) % 1.0;
+                const exactActiveCometHeadVirtualIndex = normalizedTimelinePositionTracker * (capacityCount + 4) - 2; 
+
+                for (let i = 0; i < capacityCount; i++) {
+                    const targetPhysicalIndexId = assignedOrder[i];
+                    if (targetPhysicalIndexId >= 0 && targetPhysicalIndexId < 32) {
+                        let structuralCometIlluminationAttenuation = 0.0;
+                        if (i <= exactActiveCometHeadVirtualIndex) {
+                            const distanceOffsetLagFromHead = exactActiveCometHeadVirtualIndex - i;
+                            structuralCometIlluminationAttenuation = Math.max(0, 1.0 - (distanceOffsetLagFromHead / 3.5)); 
+                        } else {
+                            const distanceOffsetAheadFromHead = i - exactActiveCometHeadVirtualIndex;
+                            structuralCometIlluminationAttenuation = Math.max(0, 1.0 - (distanceOffsetAheadFromHead / 0.8));
+                        }
+                        const finalComputedCometPixelIntensityVal = Math.floor(structuralCometIlluminationAttenuation * 255);
+                        outputBuffer[targetPhysicalIndexId] = Math.max(outputBuffer[targetPhysicalIndexId], finalComputedCometPixelIntensityVal);
+                    }
+                }
             }
         }
     </script>
