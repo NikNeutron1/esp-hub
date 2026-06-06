@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32-C6 Hub Controller</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: #f4f6f9; color: #333; max-width: 900px; margin: 40px auto; padding: 0 20px;
+        }
+        header {
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px;
+        }
+        .status-panel {
+            background: white; padding: 20px; border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 30px;
+            display: flex; gap: 40px; align-items: center;
+        }
+        .status-indicator {
+            display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+            background-color: #ef4444; margin-right: 8px;
+        }
+        .status-indicator.connected { background-color: #22c55e; }
+        .status-indicator.discovering { background-color: #eab308; }
+        button {
+            background-color: #2563eb; color: white; border: none; padding: 10px 20px;
+            border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s;
+        }
+        button:hover { background-color: #1d4ed8; }
+        button:disabled { background-color: #94a3b8; cursor: not-allowed; }
+        table {
+            width: 100%; border-collapse: collapse; background: white;
+            border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        th, td { padding: 14px 20px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+        th { background-color: #f8fafc; color: #64748b; font-weight: 600; text-transform: uppercase; font-size: 0.85rem; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #cbd5e1; transition: .3s; border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 16px; width: 16px;
+            left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #22c55e; }
+        input:checked + .slider:before { transform: translateX(20px); }
+        code { font-weight: bold; color: #0f172a; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>ESP32-C6 Hub Controller</h1>
+        <button id="btn-connect">Connect Serial</button>
+    </header>
+
+    <section class="status-panel">
+        <div>
+            <strong>Serial Status:</strong> 
+            <span id="serial-status-dot" class="status-indicator"></span>
+            <span id="serial-status-text">Disconnected</span>
+        </div>
+        <div>
+            <strong>Hub State:</strong> 
+            <span id="hub-state">UNKNOWN</span>
+        </div>
+        <div>
+            <strong>Satellites Found:</strong> 
+            <span id="satellites-count">0</span>
+        </div>
+        <button id="btn-discover" disabled>Trigger Discovery</button>
+    </section>
+
+    <section>
+        <h2>Discovered Satellites</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Satellite ID</th>
+                    <th>Light 1</th>
+                    <th>Light 2</th>
+                    <th>Light 3</th>
+                    <th>Light 4</th>
+                </tr>
+            </thead>
+            <tbody id="satellite-rows"></tbody>
+        </table>
+    </section>
+
+    <script>
+        let port = null;
+        let writer = null;
+        let reader = null;
+        let readableStreamClosed = null;
+        let writableStreamClosed = null;
+
+        const btnConnect = document.getElementById('btn-connect');
+        const btnDiscover = document.getElementById('btn-discover');
+        const serialDot = document.getElementById('serial-status-dot');
+        const serialText = document.getElementById('serial-status-text');
+        const hubStateText = document.getElementById('hub-state');
+        const satCountText = document.getElementById('satellites-count');
+        const tableBody = document.getElementById('satellite-rows');
+
+        let satelliteRegistry = {}; 
+
+        btnConnect.addEventListener('click', async () => {
+            if (port) {
+                // Safe non-blocking teardown procedure sequences
+                if (reader) {
+                    await reader.cancel();
+                    await readableStreamClosed.catch(() => {});
+                    reader = null;
+                }
+                if (writer) {
+                    await writer.close();
+                    await writableStreamClosed.catch(() => {});
+                    writer = null;
+                }
+                await port.close();
+                port = null;
+                updateSerialUI(false);
+                return;
+            }
+
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 }); // Matches hardware configurations cleanly
+                
+                updateSerialUI(true);
+                
+                // Track closed states to avoid unlocking/closing issues later
+                const encoder = new TextEncoderStream();
+                writableStreamClosed = encoder.readable.pipeTo(port.writable);
+                writer = encoder.writable.getWriter();
+
+                readSerialLoop();
+            } catch (err) {
+                console.error("Serial Connection Failed:", err);
+                alert("Failed to connect to Serial device.");
+                updateSerialUI(false);
+            }
+        });
+
+        btnDiscover.addEventListener('click', async () => {
+            if (writer) {
+                tableBody.innerHTML = ""; 
+                satelliteRegistry = {};
+                await writer.write("DISCOVER\n");
+            }
+        });
+
+        function updateSerialUI(isConnected) {
+            if (isConnected) {
+                btnConnect.textContent = "Disconnect Serial";
+                serialDot.className = "status-indicator connected";
+                serialText.textContent = "Connected";
+                btnDiscover.disabled = false;
+            } else {
+                btnConnect.textContent = "Connect Serial";
+                serialDot.className = "status-indicator";
+                serialText.textContent = "Disconnected";
+                hubStateText.textContent = "UNKNOWN";
+                satCountText.textContent = "0";
+                btnDiscover.disabled = true;
+                tableBody.innerHTML = "";
+            }
+        }
+
+        async function readSerialLoop() {
+            const decoder = new TextDecoderStream();
+            readableStreamClosed = port.readable.pipeTo(decoder.writable);
+            reader = decoder.readable.getReader();
+
+            let buffer = "";
+            try {
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += value;
+                    let lines = buffer.split("\n");
+                    buffer = lines.pop(); 
+
+                    for (let line of lines) {
+                        parseIncomingLine(line.trim());
+                    }
+                }
+            } catch (error) {
+                console.error("Read error:", error);
+            } finally {
+                reader.releaseLock();
+            }
+        }
+
+        function parseIncomingLine(line) {
+            if (!line) return;
+            console.log("From ESP32:", line);
+
+            if (line.startsWith("STATUS:")) {
+                const state = line.split(":")[1];
+                hubStateText.textContent = state;
+                if (state === "DISCOVERING") {
+                    serialDot.className = "status-indicator discovering";
+                } else if (state === "RUNNING") {
+                    serialDot.className = "status-indicator connected";
+                }
+            }
+            else if (line.startsWith("COUNT:")) {
+                satCountText.textContent = line.split(":")[1];
+            }
+            else if (line.startsWith("FOUND:")) {
+                const idStr = line.split(":")[1];
+                if (!satelliteRegistry[idStr]) {
+                    satelliteRegistry[idStr] = [false, false, false, false];
+                    appendSatelliteRow(idStr);
+                }
+            }
+        }
+
+        function appendSatelliteRow(idStr) {
+            const tr = document.createElement('tr');
+            tr.id = `sat-${idStr}`;
+            
+            let html = `<td><code>${idStr}</code></td>`;
+            for (let i = 0; i < 4; i++) {
+                html += `
+                    <td>
+                        <label class="switch">
+                            <input type="checkbox" data-sat="${idStr}" data-light="${i}" onchange="handleToggle(this)">
+                            <span class="slider"></span>
+                        </label>
+                    </td>`;
+            }
+            tr.innerHTML = html;
+            tableBody.appendChild(tr);
+        }
+
+        async function handleToggle(checkbox) {
+            const idStr = checkbox.getAttribute('data-sat');
+            const lightIndex = parseInt(checkbox.getAttribute('data-light'));
+            const state = checkbox.checked ? 1 : 0;
+
+            satelliteRegistry[idStr][lightIndex] = checkbox.checked;
+
+            if (writer) {
+                const cmd = `LIGHT:${idStr}:${lightIndex}:${state}\n`;
+                await writer.write(cmd);
+                console.log("Sent command:", cmd.trim());
+            }
+        }
+    </script>
+</body>
+</html>
